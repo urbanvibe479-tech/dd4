@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "Best AMZ Extension 2",
+  "version": "1.0.14",
+  "description": "Best AMZ Extension 2 - security partner for BEST AMZ Tools access.",
+  "action": {
+    "default_title": "Best AMZ Extension 2",
+    "default_icon": {
+      "16": "logo.png",
+      "48": "logo.png",
+      "128": "logo.png"
+    }
+  },
+  "icons": {
+    "16": "logo.png",
+    "48": "logo.png",
+    "128": "logo.png"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "alarms",
+    "browsingData",
+    "cookies",
+    "management",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwSlfgf+8V3BoEaPOuxvKdhxE7OZc61akjcFmdd7L1iHaRc+9CziKC0k7r9eq3saa7iiJTzTFJjb14pCWI6yGy/20mBmksDiEoiuoOpLAtW3Z6oYZwomEHt5KWz6keuQI9CxYp2p/Up5VjNK8RTs25h/ue27DS8r/GOyutNZY4oEZlIvswOfGg+4KeIiOYQDe30O23j+9uWTICCAXbo3zSfd4bPQsA4HlmpFZjvIrJlK7qK/N8uczjt0fS6dAxfxDnE/qgwgJLiUW5ucxLcyXWezux0TgFxN6rFA+tgg+9k0BvDBuOwyGEluNUZFL9EBgmx46ABfYMt7rrG9Q3RRicQIDAQAB",
+  "content_scripts": [
+    {
+      "matches": [
+        "https://bestamztools.com/*",
+        "https://www.bestamztools.com/*"
+      ],
+      "js": [
+        "content-script.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}
