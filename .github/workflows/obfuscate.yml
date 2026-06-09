@@ -1,0 +1,244 @@
+name: Build Best AMZ Extension 2 Safe Secure One Line
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install build tools
+        run: npm install -g javascript-obfuscator terser
+
+      - name: Create light obfuscator config
+        run: |
+          node -e 'const fs=require("fs");const cfg={target:"browser-no-eval",compact:true,stringArray:true,stringArrayThreshold:0.45,stringArrayEncoding:["base64"],identifierNamesGenerator:"hexadecimal",renameGlobals:false,controlFlowFlattening:false,deadCodeInjection:false,debugProtection:false,selfDefending:false,disableConsoleOutput:false,sourceMap:false};fs.writeFileSync("obfuscator.json",JSON.stringify(cfg,null,2));'
+
+      - name: Prepare dist folder
+        run: |
+          rm -rf dist
+          mkdir -p dist
+
+          tar \
+            --exclude='./dist' \
+            --exclude='./.git' \
+            --exclude='./.github' \
+            --exclude='./node_modules' \
+            --exclude='./obfuscator.json' \
+            -cf - . | tar -xf - -C dist
+
+      - name: Clean legacy itsamz.com domain only
+        run: |
+          set -e
+
+          find dist -type f \( -name "*.js" -o -name "*.html" -o -name "*.css" \) | while read -r file; do
+            echo "Checking legacy domain in: $file"
+            perl -0pi -e 's/www\.itsamz\.com/www.bestamztools.com/g; s/itsamz\.com/bestamztools.com/g' "$file"
+          done
+
+      - name: Hide direct API URL in background safely
+        run: |
+          set -e
+
+          if [ -f "dist/background.js" ]; then
+            node -e 'const fs=require("fs");const f="dist/background.js";let s=fs.readFileSync(f,"utf8");const e="(()=>[\"aHR0cHM6Ly8=\",\"YmVzdGFtenRvb2xzLmNvbQ==\",\"L2dldF90b29sX2RhdGEucGhw\"].map(x=>atob(x)).join(\"\"))()";s=s.replace(/([\"\x27])https:\/\/bestamztools\.com\/get_tool_data\.php\1/g,e);fs.writeFileSync(f,s,"utf8");'
+          fi
+
+      - name: Obfuscate normal JS files safely
+        run: |
+          set -e
+
+          JS_FILES=(
+            "content-script.js"
+          )
+
+          for file in "${JS_FILES[@]}"; do
+            if [ -f "$file" ]; then
+              if grep -Eq 'a0_0x|_0x[0-9a-fA-F]{3,}' "$file"; then
+                echo "Already obfuscated, skipping double obfuscation: $file"
+              else
+                echo "Light obfuscating $file"
+                javascript-obfuscator "$file" --output "dist/$file" --config obfuscator.json
+              fi
+            else
+              echo "Optional file not found, skipping: $file"
+            fi
+          done
+
+      - name: Final one-line minify JS safely
+        run: |
+          set -e
+
+          find dist -type f -name "*.js" ! -name "*.min.js" | while read -r file; do
+            lines=$(wc -l < "$file" | tr -d ' ')
+
+            if [ "$lines" -le 3 ]; then
+              echo "Already one-line / compact, skipping: $file"
+              continue
+            fi
+
+            echo "Trying one-line minify: $file"
+
+            cp "$file" "$file.backup"
+
+            if terser "$file" --format comments=false --output "$file.tmp"; then
+              mv "$file.tmp" "$file"
+              rm -f "$file.backup"
+              echo "One-line minify OK: $file"
+            else
+              echo "Terser failed, keeping original safe file: $file"
+              mv "$file.backup" "$file"
+              rm -f "$file.tmp"
+            fi
+          done
+
+      - name: Validate manifest JSON and required fields
+        run: |
+          set -e
+
+          node -e 'const fs=require("fs");const src=JSON.parse(fs.readFileSync("manifest.json","utf8"));const dst=JSON.parse(fs.readFileSync("dist/manifest.json","utf8"));if(!dst.key)throw new Error("manifest key missing");if(dst.version!==src.version)throw new Error("version changed. Source: "+src.version+" Dist: "+dst.version);if(JSON.stringify(src.content_scripts||[])!==JSON.stringify(dst.content_scripts||[]))throw new Error("content_scripts changed");if(JSON.stringify(src.host_permissions||[])!==JSON.stringify(dst.host_permissions||[]))throw new Error("host_permissions changed");if(JSON.stringify(src.permissions||[])!==JSON.stringify(dst.permissions||[]))throw new Error("permissions changed");console.log("manifest ok, version preserved:",dst.version);'
+
+          cmp -s manifest.json dist/manifest.json || (echo "manifest.json changed. Build stopped." && exit 1)
+
+      - name: Validate JS syntax
+        run: |
+          set -e
+
+          find dist -type f -name "*.js" ! -name "*.min.js" | while read -r file; do
+            echo "Checking syntax: $file"
+            node --check "$file"
+          done
+
+      - name: Domain checks
+        run: |
+          set -e
+
+          if grep -R "itsamz.com" -n dist; then
+            echo "itsamz.com found after cleanup. Build stopped."
+            exit 1
+          fi
+
+          if ! grep -R "bestamztools.com" -n dist >/dev/null; then
+            echo "bestamztools.com not found. Build stopped."
+            exit 1
+          fi
+
+          echo "Domain checks OK"
+
+      - name: Generate hashes TXT, HTML and report
+        run: |
+          set -e
+
+          VERSION=$(node -p "require('./manifest.json').version")
+          EXT_NAME=$(node -p "require('./manifest.json').name.replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'')")
+
+          HASH_TXT="${EXT_NAME}-v${VERSION}-Hashes.txt"
+          HASH_HTML="${EXT_NAME}-v${VERSION}-Hashes.html"
+          REPORT_FILE="${EXT_NAME}-v${VERSION}-Check-Report.txt"
+
+          {
+            echo "${EXT_NAME} v${VERSION} Final Safe Secure One Line"
+            echo "Generated by GitHub Actions"
+            echo ""
+            echo "SHA256 Hashes:"
+            echo ""
+
+            find dist -type f | sort | while read -r file; do
+              hash=$(sha256sum "$file" | awk '{print $1}')
+              rel="${file#dist/}"
+              echo "$hash  $rel"
+            done
+          } > "$HASH_TXT"
+
+          {
+            echo "<!doctype html>"
+            echo "<html lang='en'>"
+            echo "<head>"
+            echo "<meta charset='utf-8'>"
+            echo "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            echo "<title>${EXT_NAME} v${VERSION} Hashes</title>"
+            echo "<style>"
+            echo "body{font-family:Arial,sans-serif;background:#f8fafc;color:#0f172a;padding:24px}"
+            echo ".card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:20px;box-shadow:0 10px 25px rgba(15,23,42,.08)}"
+            echo "h1{font-size:22px;margin:0 0 6px}"
+            echo "p{margin:0 0 18px;color:#475569}"
+            echo "table{width:100%;border-collapse:collapse;font-size:13px}"
+            echo "th,td{border-bottom:1px solid #e5e7eb;padding:10px;text-align:left;vertical-align:top}"
+            echo "th{background:#f1f5f9;font-weight:700}"
+            echo "code{font-family:Consolas,monospace;font-size:12px;word-break:break-all}"
+            echo ".ok{display:inline-block;background:#dcfce7;color:#166534;border-radius:999px;padding:4px 10px;font-weight:700;font-size:12px}"
+            echo "</style>"
+            echo "</head>"
+            echo "<body>"
+            echo "<div class='card'>"
+            echo "<h1>${EXT_NAME} v${VERSION} Hash Report</h1>"
+            echo "<p><span class='ok'>Build OK</span> SHA256 hashes generated for final extension files.</p>"
+            echo "<table>"
+            echo "<thead><tr><th>File</th><th>SHA256 Hash</th></tr></thead>"
+            echo "<tbody>"
+
+            find dist -type f | sort | while read -r file; do
+              hash=$(sha256sum "$file" | awk '{print $1}')
+              rel="${file#dist/}"
+              safe_rel=$(printf '%s' "$rel" | sed 's/&/\&amp;/g; s/</\&lt;/g; s/>/\&gt;/g')
+              echo "<tr><td>$safe_rel</td><td><code>$hash</code></td></tr>"
+            done
+
+            echo "</tbody>"
+            echo "</table>"
+            echo "</div>"
+            echo "</body>"
+            echo "</html>"
+          } > "$HASH_HTML"
+
+          {
+            echo "${EXT_NAME} v${VERSION} - Check Report"
+            echo ""
+            echo "Status: OK"
+            echo "Manifest: preserved exactly"
+            echo "Manifest key: preserved"
+            echo "Version: preserved from source manifest"
+            echo "Permissions: not changed"
+            echo "content_scripts: not changed"
+            echo "host_permissions: not changed"
+            echo "Legacy domain cleanup: itsamz.com replaced with bestamztools.com in JS/HTML/CSS only"
+            echo "background.js: direct API URL hidden safely where plain URL exists"
+            echo "JS obfuscation: light only"
+            echo "Final JS format: one-line where safe"
+            echo "Terser fail-safe: enabled"
+            echo "Double-obfuscated files: skipped automatically"
+            echo "Hash TXT: generated"
+            echo "Hash HTML: generated"
+            echo "itsamz.com: not present"
+            echo "bestamztools.com: present"
+          } > "$REPORT_FILE"
+
+      - name: Create final ZIP
+        run: |
+          set -e
+
+          VERSION=$(node -p "require('./manifest.json').version")
+          EXT_NAME=$(node -p "require('./manifest.json').name.replace(/[^a-zA-Z0-9]+/g,'-').replace(/^-+|-+$/g,'')")
+
+          cd dist
+          zip -r "../${EXT_NAME}-v${VERSION}-Final-Safe-Secure-One-Line.zip" .
+          cd ..
+
+      - name: Upload final files
+        uses: actions/upload-artifact@v4
+        with:
+          name: Best-AMZ-Extension-2-Final-Safe-Secure-One-Line
+          path: |
+            *Final-Safe-Secure-One-Line.zip
+            *Hashes.txt
+            *Hashes.html
+            *Check-Report.txt
